@@ -642,9 +642,9 @@ class TabNet(torch.nn.Module):
     def set_loss_fn(self, loss_fn): #added
         self.tabnet.encoder.set_loss_fn(loss_fn)
 
-    def forward(self, x):
+    def forward(self, x,y=None): #modified
         x = self.embedder(x)
-        return self.tabnet(x)
+        return self.tabnet(x,y=None)
 
     def forward_masks(self, x):
         x = self.embedder(x)
