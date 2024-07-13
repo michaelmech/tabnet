@@ -519,7 +519,6 @@ class TabNetNoEmbeddings(torch.nn.Module):
         else:
             self.final_mapping = Linear(n_d, output_dim, bias=False)
             initialize_non_glu(self.final_mapping, n_d, output_dim)
-        self.encoder._set_step_mappings(self.output_dim)
 
     def forward(self, x, y=None): #modified
         total_prediction, steps_output, M_loss, feature_importances = self.encoder(x, y)
