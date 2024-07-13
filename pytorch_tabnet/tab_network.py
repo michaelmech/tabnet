@@ -392,6 +392,9 @@ class TabNetPretraining(torch.nn.Module):
             mask_type=mask_type,
             group_attention_matrix=self.embedder.embedding_group_matrix,
         )
+
+        
+        
         self.decoder = TabNetDecoder(
             self.post_embed_dim,
             n_d=n_d,
@@ -635,6 +638,9 @@ class TabNet(torch.nn.Module):
             mask_type,
             self.embedder.embedding_group_matrix
         )
+
+    def set_loss_fn(self, loss_fn): #added
+        self.tabnet.encoder.set_loss_fn(loss_fn)
 
     def forward(self, x):
         x = self.embedder(x)
