@@ -54,6 +54,7 @@ class TabNetEncoder(torch.nn.Module):
         momentum=0.02,
         mask_type="sparsemax",
         group_attention_matrix=None,
+        learning_rate=0.1 #added
     ):
         """
         Defines main part of the TabNet network without the embedding layers.
@@ -103,6 +104,7 @@ class TabNetEncoder(torch.nn.Module):
         self.mask_type = mask_type
         self.initial_bn = BatchNorm1d(self.input_dim, momentum=0.01)
         self.group_attention_matrix = group_attention_matrix
+        self.learning_rate =learning_rate #added
 
         if self.group_attention_matrix is None:
             # no groups
@@ -158,48 +160,63 @@ class TabNetEncoder(torch.nn.Module):
             self.feat_transformers.append(transformer)
             self.att_transformers.append(attention)
 
-    def forward(self, x, prior=None):
+    def forward(self, x, y=None): #modified
         x = self.initial_bn(x)
-
         bs = x.shape[0]
-        if prior is None:
-            prior = torch.ones((bs, self.attention_dim)).to(x.device)
 
+        prior = torch.ones((bs, self.attention_dim)).to(x.device)
         M_loss = 0
-        att = self.initial_splitter(x)[:, self.n_d :]
+        att = self.initial_splitter(x)[:, self.n_d:]
         steps_output = []
-        residuals = x  # Initialize residuals with input
+        
+        total_prediction = torch.zeros((bs, self.output_dim)).to(x.device)
+        feature_importances = torch.zeros((self.input_dim,)).to(x.device)
 
         for step in range(self.n_steps):
             M = self.att_transformers[step](prior, att)
             M_loss += torch.mean(
                 torch.sum(torch.mul(M, torch.log(M + self.epsilon)), dim=1)
             )
-            # update prior
+            
+            # Update feature importances
+            feature_importances += torch.sum(M, dim=0)
+
+            # Update prior
             prior = torch.mul(self.gamma - M, prior)
-            # output
+            
+            # Output
             M_feature_level = torch.matmul(M, self.group_attention_matrix)
-            masked_x = torch.mul(M_feature_level, residuals)  # Use residuals instead of x
+            masked_x = torch.mul(M_feature_level, x)
             out = self.feat_transformers[step](masked_x)
             d = ReLU()(out[:, : self.n_d])
-            steps_output.append(d)
-            # update attention
+            
+            # Predict residuals
+            step_prediction = self.step_mappings[step](d)
+            total_prediction += self.learning_rate * step_prediction
+            
+            steps_output.append(step_prediction)
+            
+            # Update attention
             att = out[:, self.n_d :]
 
-            # Update residuals
-            if step < self.n_steps - 1:  # Don't update residuals on the last step
-                step_prediction = self.step_mappings[step](d)
-                residuals = residuals - step_prediction
+            # Compute pseudo-residuals if y is provided (during training)
+            if y is not None and step < self.n_steps - 1:
+                with torch.no_grad():
+                    grad = self.loss_fn(total_prediction, y).grad
+                x = grad.unsqueeze(1) * x  # Use gradient to guide next step
 
         M_loss /= self.n_steps
-        return steps_output, M_loss
+        return total_prediction, steps_output, M_loss, feature_importances
 
-    def _set_step_mappings(self, output_dim):
+    def _set_step_mappings(self): #added
         self.step_mappings = torch.nn.ModuleList([
-            Linear(self.n_d, output_dim, bias=False) for _ in range(self.n_steps - 1)
+            Linear(self.n_d, self.output_dim, bias=False) for _ in range(self.n_steps)
         ])
         for mapping in self.step_mappings:
-            initialize_non_glu(mapping, self.n_d, output_dim)
+            initialize_non_glu(mapping, self.n_d, self.output_dim)
+
+    def set_loss_fn(self, loss_fn): #added
+        self.loss_fn = loss_fn
 
     def forward_masks(self, x):
         x = self.initial_bn(x)
@@ -490,6 +507,8 @@ class TabNetNoEmbeddings(torch.nn.Module):
             mask_type=mask_type,
             group_attention_matrix=group_attention_matrix
         )
+
+        self.encoder._set_step_mappings() #added
         
         if self.is_multi_task:
             self.multi_task_mappings = torch.nn.ModuleList()
@@ -502,22 +521,15 @@ class TabNetNoEmbeddings(torch.nn.Module):
             initialize_non_glu(self.final_mapping, n_d, output_dim)
         self.encoder._set_step_mappings(self.output_dim)
 
-    def forward(self, x):
-        steps_output, M_loss = self.encoder(x)
-        
-        # Compute the final output as the sum of all step predictions
-        res = torch.zeros((x.shape[0], self.output_dim)).to(x.device)
-        for i, step_output in enumerate(steps_output):
-            if i < self.n_steps - 1:
-                res += self.encoder.step_mappings[i](step_output)
-            else:
-                res += self.final_mapping(step_output)
+     def forward(self, x, y=None): #modified
+        total_prediction, steps_output, M_loss, feature_importances = self.encoder(x, y)
+        return total_prediction, M_loss, feature_importances
 
-        return res, M_loss
+    def set_loss_fn(self, loss_fn): #added
+        self.encoder.set_loss_fn(loss_fn)
 
     def forward_masks(self, x):
         return self.encoder.forward_masks(x)
-
 
 class TabNet(torch.nn.Module):
     def __init__(
