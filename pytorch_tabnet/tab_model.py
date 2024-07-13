@@ -120,6 +120,7 @@ class TabNetRegressor(TabModel):
         self._task = 'regression'
         self._default_loss = torch.nn.functional.mse_loss
         self._default_metric = 'mse'
+        self.network.set_loss_fn(self.loss_fn) #added
 
     def compute_loss(self, y_pred, y_true):
         return self.loss_fn(y_pred, y_true)
@@ -155,3 +156,26 @@ class TabNetRegressor(TabModel):
         y_true = np.vstack(list_y_true)
         y_score = np.vstack(list_y_score)
         return y_true, y_score
+
+    def _train_batch(self, X, y): #added
+        batch_logs = {"batch_size": X.shape[0]}
+
+        X = X.to(self.device).float()
+        y = y.to(self.device).float()
+
+        for param in self.network.parameters():
+            param.grad = None
+
+        output, M_loss, _ = self.network(X, y)
+
+        loss = self.compute_loss(output, y)
+        loss = loss - self.lambda_sparse * M_loss
+
+        loss.backward()
+        if self.clip_value:
+            clip_grad_norm_(self.network.parameters(), self.clip_value)
+        self._optimizer.step()
+
+        batch_logs["loss"] = loss.cpu().detach().numpy().item()
+
+        return batch_logs
