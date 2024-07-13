@@ -5,8 +5,8 @@ from pytorch_tabnet.utils import SparsePredictDataset, PredictDataset, filter_we
 from pytorch_tabnet.abstract_model import TabModel
 from pytorch_tabnet.multiclass_utils import infer_output_dim, check_output_dim
 from torch.utils.data import DataLoader
+from torch.nn.utils import clip_grad_norm_
 import scipy
-
 
 class TabNetClassifier(TabModel):
     def __post_init__(self):
