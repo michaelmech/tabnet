@@ -121,6 +121,9 @@ class TabNetRegressor(TabModel):
         self._default_loss = torch.nn.functional.mse_loss
         self._default_metric = 'mse'
 
+    def compute_loss(self, y_pred, y_true):
+        return self.loss_fn(y_pred, y_true)
+
     def prepare_target(self, y):
         return y
 
