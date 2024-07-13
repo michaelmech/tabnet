@@ -194,6 +194,13 @@ class TabNetEncoder(torch.nn.Module):
         M_loss /= self.n_steps
         return steps_output, M_loss
 
+    def _set_step_mappings(self, output_dim):
+        self.step_mappings = torch.nn.ModuleList([
+            Linear(self.n_d, output_dim, bias=False) for _ in range(self.n_steps - 1)
+        ])
+        for mapping in self.step_mappings:
+            initialize_non_glu(mapping, self.n_d, output_dim)
+
     def forward_masks(self, x):
         x = self.initial_bn(x)
         bs = x.shape[0]  # batch size
