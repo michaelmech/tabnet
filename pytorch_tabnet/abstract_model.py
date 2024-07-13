@@ -238,6 +238,7 @@ class TabModel(BaseEstimator):
         if not hasattr(self, "network") or not warm_start:
             # model has never been fitted before of warm_start is False
             self._set_network()
+            self.network.set_loss_fn(self.loss_fn) #added
         self._update_network_params()
         self._set_metrics(eval_metric, eval_names)
         self._set_optimizer()
