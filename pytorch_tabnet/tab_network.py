@@ -161,13 +161,15 @@ class TabNetEncoder(torch.nn.Module):
     def forward(self, x, prior=None):
         x = self.initial_bn(x)
 
-        bs = x.shape[0]  # batch size
+        bs = x.shape[0]
         if prior is None:
             prior = torch.ones((bs, self.attention_dim)).to(x.device)
 
         M_loss = 0
         att = self.initial_splitter(x)[:, self.n_d :]
         steps_output = []
+        residuals = x  # Initialize residuals with input
+
         for step in range(self.n_steps):
             M = self.att_transformers[step](prior, att)
             M_loss += torch.mean(
@@ -177,12 +179,17 @@ class TabNetEncoder(torch.nn.Module):
             prior = torch.mul(self.gamma - M, prior)
             # output
             M_feature_level = torch.matmul(M, self.group_attention_matrix)
-            masked_x = torch.mul(M_feature_level, x)
+            masked_x = torch.mul(M_feature_level, residuals)  # Use residuals instead of x
             out = self.feat_transformers[step](masked_x)
             d = ReLU()(out[:, : self.n_d])
             steps_output.append(d)
             # update attention
             att = out[:, self.n_d :]
+
+            # Update residuals
+            if step < self.n_steps - 1:  # Don't update residuals on the last step
+                step_prediction = self.step_mappings[step](d)
+                residuals = residuals - step_prediction
 
         M_loss /= self.n_steps
         return steps_output, M_loss
@@ -476,7 +483,7 @@ class TabNetNoEmbeddings(torch.nn.Module):
             mask_type=mask_type,
             group_attention_matrix=group_attention_matrix
         )
-
+        
         if self.is_multi_task:
             self.multi_task_mappings = torch.nn.ModuleList()
             for task_dim in output_dim:
@@ -486,20 +493,20 @@ class TabNetNoEmbeddings(torch.nn.Module):
         else:
             self.final_mapping = Linear(n_d, output_dim, bias=False)
             initialize_non_glu(self.final_mapping, n_d, output_dim)
+        self.encoder._set_step_mappings(self.output_dim)
 
     def forward(self, x):
-        res = 0
         steps_output, M_loss = self.encoder(x)
-        res = torch.sum(torch.stack(steps_output, dim=0), dim=0)
+        
+        # Compute the final output as the sum of all step predictions
+        res = torch.zeros((x.shape[0], self.output_dim)).to(x.device)
+        for i, step_output in enumerate(steps_output):
+            if i < self.n_steps - 1:
+                res += self.encoder.step_mappings[i](step_output)
+            else:
+                res += self.final_mapping(step_output)
 
-        if self.is_multi_task:
-            # Result will be in list format
-            out = []
-            for task_mapping in self.multi_task_mappings:
-                out.append(task_mapping(res))
-        else:
-            out = self.final_mapping(res)
-        return out, M_loss
+        return res, M_loss
 
     def forward_masks(self, x):
         return self.encoder.forward_masks(x)
