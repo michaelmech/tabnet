@@ -588,7 +588,7 @@ class TabModel(BaseEstimator):
         X = X.to(self.device).float()
 
         # compute model output
-        scores, _ = self.network(X)
+        scores, _,_,_ = self.network(X)
 
         if isinstance(scores, list):
             scores = [x.cpu().detach().numpy() for x in scores]
