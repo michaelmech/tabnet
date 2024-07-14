@@ -525,7 +525,7 @@ class TabNetNoEmbeddings(torch.nn.Module):
 
     def forward(self, x, y=None): #modified
         total_prediction, steps_output, M_loss, feature_importances = self.encoder(x, y)
-        return total_prediction, M_loss
+        return total_prediction, M_loss,feature_importances, steps_output
 
     def set_loss_fn(self, loss_fn): #added
         self.encoder.set_loss_fn(loss_fn)
