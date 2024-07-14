@@ -165,7 +165,7 @@ class TabNetRegressor(TabModel):
         for param in self.network.parameters():
             param.grad = None
 
-        output, M_loss, _ = self.network(X, y)
+        output, M_loss, _ ,steps_output= self.network(X, y)
 
         loss = self.compute_loss(output, y)
         loss = loss - self.lambda_sparse * M_loss
@@ -178,3 +178,35 @@ class TabNetRegressor(TabModel):
         batch_logs["loss"] = loss.cpu().detach().numpy().item()
 
         return batch_logs
+
+    def _compute_feature_importances(self, X): #added
+        self.network.eval()
+        with torch.no_grad():
+            _, _, feature_importances, _ = self.network(torch.tensor(X).float().to(self.device))
+        self.feature_importances_ = feature_importances.cpu().numpy()
+        self.feature_importances_ /= self.feature_importances_.sum()
+
+    def predict(self, X): #added
+        self.network.eval()
+        
+        if scipy.sparse.issparse(X):
+            dataloader = DataLoader(
+                SparsePredictDataset(X),
+                batch_size=self.batch_size,
+                shuffle=False,
+            )
+        else:
+            dataloader = DataLoader(
+                PredictDataset(X),
+                batch_size=self.batch_size,
+                shuffle=False,
+            )
+    
+        results = []
+        for batch_nb, data in enumerate(dataloader):
+            data = data.to(self.device).float()
+            output, _, _, _ = self.network(data)
+            predictions = output.cpu().detach().numpy()
+            results.append(predictions)
+        res = np.vstack(results)
+        return self.predict_func(res)
